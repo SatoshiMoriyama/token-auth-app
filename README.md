@@ -2,35 +2,37 @@
 
 ## システム概要
 
-このプロジェクトは、AWS API Gateway の機能を使用してトークンを生成・配布するサーバーレスアプリケーションです。認証機能は含まず、シンプルにトークンを発行することに特化しています。
+このプロジェクトは、AWS API Gateway と Lambda Authorizer を使用してトークンを生成・配布するサーバーレスアプリケーションです。Momento Cache を使用してトークンを管理し、検証API用のキャッシュシステムを提供します。
 
 ### 主な特徴
 
 - **認証不要**: 誰でもアクセス可能なパブリックAPI
-- **API Gateway主導**: トークン生成とヘッダマッピングをAPI Gatewayの機能で実現
-- **バックエンド最小化**: Lambda関数は基本的なレスポンスのみを返却
-- **非永続化**: トークンは永続化されません（一時的な利用のみ）
+- **REQUEST オーソライザ**: 毎回新しいトークンを生成
+- **Momento Cache統合**: トークンをキャッシュして検証API用に保存
+- **シンプルなレスポンス**: 必要最小限の情報のみを返却
 
 ### アーキテクチャ
 
 1. **GET /hello** エンドポイントへのリクエスト
-2. **Lambda関数** が基本的なレスポンスを返却
-3. **API Gateway** がマッピングテンプレートでトークンを生成
-4. **レスポンス** にトークンがヘッダ (`X-Access-Token`) とボディに含まれる
+2. **Lambda Authorizer** が新しいトークンを生成
+3. **Momento Cache** にトークンを保存（5分間TTL）
+4. **Lambda関数** が基本的なレスポンスを返却
+5. **API Gateway** がレスポンスを整形してクライアントに返却
 
 ### 生成されるトークン
 
-- フォーマット: `temp-token-{requestId}`
-- 例: `temp-token-12345678-1234-1234-1234-123456789012`
+- フォーマット: `{timestamp}-{uuid8}`
+- 例: `1752780286152-f28ade6c`
 - リクエストごとにユニークなトークンが生成されます
+- Momento Cacheに5分間保存され、検証API用に使用可能
 
 ### プロジェクト構成
 
+- `authorizer/` - Lambda Authorizer関数のコード
 - `hello_world/` - Lambda関数のコード
 - `template.yaml` - AWS SAMテンプレート（API Gateway設定含む）
 - `test_local.py` - ローカルテスト用スクリプト
-- `events/` - 関数呼び出し用イベントデータ
-- `tests/` - ユニットテスト
+- `samconfig.toml` - SAM設定ファイル
 
 ### API仕様
 
@@ -45,60 +47,69 @@
   - `X-Access-Token`: 生成されたアクセストークン
   - `Access-Control-Allow-Origin`: *
   - `Access-Control-Expose-Headers`: X-Access-Token
-- **ボディ**: JSON形式でトークン情報を含む
+- **ボディ**: JSON形式でトークンとステータス情報
 
 ```json
 {
-  "message": "リクエストが正常に処理されました",
-  "timestamp": "2025-07-17T04:57:10.538062",
-  "status": "success",
-  "newToken": "temp-token-12345678-1234-1234-1234-123456789012",
-  "hasNewToken": true,
-  "note": "トークンはAPI Gatewayで生成されました",
-  "requestId": "12345678-1234-1234-1234-123456789012"
+  "accessToken": "1752780286152-f28ade6c",
+  "status": "success"
 }
 ```
 
-## 使用方法
+## セットアップ
 
-### ローカルテスト
+### 前提条件
+
+1. **AWS CLI**: 設定済みのAWS CLI（プロファイル: `chelky`）
+2. **AWS SAM CLI**: インストール済み
+3. **Momento Account**: API Keyが必要
+4. **Python 3.9**: Lambda実行環境
+
+### デプロイ手順
+
+#### 1. Momento API Key設定
 
 ```bash
-# Lambda関数のテスト
-python3 test_local.py
+# AWS Secrets Managerに保存
+aws secretsmanager update-secret \
+  --secret-id momento-api-key \
+  --secret-string '{"api_key":"YOUR_MOMENTO_API_KEY"}' \
+  --profile chelky \
+  --region ap-northeast-1
 ```
 
-### ビルドとデプロイ
+#### 2. Momento Cache作成
+
+Momento Consoleで以下を作成：
+- **Cache名**: `api_token`
+- **Region**: `ap-northeast-1`
+
+#### 3. ビルドとデプロイ
 
 ```bash
 # ビルド
 sam build
 
 # デプロイ
-sam deploy --guided
+sam deploy --profile chelky --region ap-northeast-1
 ```
 
-### APIの呼び出し
+### APIの使用方法
 
 ```bash
-# デプロイ後のエンドポイント例
-curl -X GET https://your-api-id.execute-api.region.amazonaws.com/Prod/hello
+# エンドポイント例
+curl -X GET https://3r97mgmt69.execute-api.ap-northeast-1.amazonaws.com/Prod/hello/
 
 # レスポンス例
-HTTP/1.1 200 OK
-X-Access-Token: temp-token-12345678-1234-1234-1234-123456789012
+HTTP/2 200
+X-Access-Token: 1752780286152-f28ade6c
 Access-Control-Allow-Origin: *
 Access-Control-Expose-Headers: X-Access-Token
 Content-Type: application/json
 
 {
-  "message": "リクエストが正常に処理されました",
-  "timestamp": "2025-07-17T04:57:10.538062",
-  "status": "success",
-  "newToken": "temp-token-12345678-1234-1234-1234-123456789012",
-  "hasNewToken": true,
-  "note": "トークンはAPI Gatewayで生成されました",
-  "requestId": "12345678-1234-1234-1234-123456789012"
+  "accessToken": "1752780286152-f28ade6c",
+  "status": "success"
 }
 ```
 
@@ -106,14 +117,30 @@ Content-Type: application/json
 
 - **AWS SAM**: サーバーレスアプリケーションフレームワーク
 - **AWS Lambda**: Python 3.9 ランタイム
-- **AWS API Gateway**: REST API（非プロキシ統合）
-- **マッピングテンプレート**: VTL（Velocity Template Language）によるトークン生成
+- **AWS API Gateway**: REST API（REQUEST オーソライザ）
+- **Momento Cache**: トークンキャッシュ（5分TTL）
+- **AWS Secrets Manager**: API Key管理
 
-## 注意事項
+## キャッシュ構造
 
-- トークンは永続化されません
-- 認証機能は含まれていません
-- 本番環境での使用には適切なセキュリティ対策が必要です
+Momento Cacheには以下の形式でトークンが保存されます：
+
+```json
+{
+  "token": "1752780286152-f28ade6c",
+  "created_at": "2025-07-17T19:17:02.864336",
+  "host": "3r97mgmt69.execute-api.ap-northeast-1.amazonaws.com",
+  "valid": true
+}
+```
+
+## 将来の拡張
+
+このシステムは検証API用のキャッシュ基盤として設計されています。将来的には以下の機能を追加予定：
+
+- **トークン検証API**: キャッシュされたトークンの有効性確認
+- **トークン無効化API**: 特定トークンの無効化
+- **使用状況分析**: トークン使用パターンの分析
 
 ---
 
