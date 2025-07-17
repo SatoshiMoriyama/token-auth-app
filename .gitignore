@@ -242,3 +242,28 @@ $RECYCLE.BIN/
 */build/*
 
 # End of https://www.gitignore.io/api/osx,linux,python,windows,pycharm,visualstudiocode
+
+# AWS SAM specific
+.aws-sam/
+samconfig.toml.backup
+
+# Momento API key verification script output
+verify_cache.py
+
+# Setup documentation
+momento-setup.md
+
+# Temporary test files
+*.tmp
+*.temp
+temp/
+
+# Secrets (additional protection)
+*.pem
+*.key
+secrets.json
+api_keys.txt
+
+# Logs
+*.log
+logs/

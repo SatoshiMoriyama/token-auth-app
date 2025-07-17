@@ -11,6 +11,12 @@ Globals:
     Timeout: 10
     MemorySize: 128
 
+Parameters:
+  MomentoCacheName:
+    Type: String
+    Default: "token-cache"
+    Description: "Momento Cache名"
+
 Resources:
   # Lambda オーソライザ関数
   TokenAuthorizerFunction:
@@ -21,7 +27,15 @@ Resources:
       Runtime: python3.9
       Architectures:
         - x86_64
-      Description: "Lambda オーソライザ関数（常に許可）"
+      Description: "Lambda オーソライザ関数（Momento Cache統合）"
+      Environment:
+        Variables:
+          MOMENTO_CACHE_NAME: !Ref MomentoCacheName
+          MOMENTO_TTL_SECONDS: 3600
+          MOMENTO_API_KEY: "{{resolve:secretsmanager:momento-api-key:SecretString:api_key}}"
+      Timeout: 30
+      Policies:
+        - SecretsManagerReadWrite
 
   # メイン API 関数
   HelloWorldFunction:
@@ -98,17 +112,9 @@ Resources:
                     responseTemplates:
                       application/json: |
                         #set($accessToken = $context.authorizer.accessToken)
-                        #set($userId = $context.authorizer.userId)
-                        #set($authTimestamp = $context.authorizer.timestamp)
                         {
-                          "message": "$input.json('$.message')",
-                          "timestamp": "$input.json('$.timestamp')",
-                          "status": "$input.json('$.status')",
                           "accessToken": "$accessToken",
-                          "userId": "$userId",
-                          "hasAccessToken": true,
-                          "note": "トークンはオーソライザで生成されました",
-                          "authTimestamp": "$authTimestamp"
+                          "status": "$input.json('$.status')"
                         }
 
   # Lambda 関数の実行権限

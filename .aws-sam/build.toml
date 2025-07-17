@@ -14,7 +14,7 @@ codeuri = "/Users/moriyamasatoshi/Documents/20250717_tokenAuth/token-auth-app/au
 runtime = "python3.9"
 architecture = "x86_64"
 handler = "app.lambda_handler"
-manifest_hash = "d41d8cd98f00b204e9800998ecf8427e"
+manifest_hash = "2b2f4507ee9dcedd17456cc9b5f735b2"
 packagetype = "Zip"
 functions = ["TokenAuthorizerFunction"]
 
